@@ -11,15 +11,18 @@ with JBL and Altec Lansing drivers.
 |-----------|-------|
 | Configuration | 4 x 2 cells (8 total) |
 | Mouth width | 11.22" (285mm) |
-| Horn depth | 5.86" (149mm) |
-| Total height | 10.68" (271mm) |
+| Horn depth | 5.71" (145mm) |
+| Total height | 10.26" (261mm) |
 | Cutoff frequency | 550 Hz |
 | Response | +10dB from 600Hz |
 | Throat | 1" (25.4mm) |
 | Thread | 1-3/8"-18 UNS |
 | Cell throat | 8.0 x 8.0 mm per cell |
-| Cell mouth | 68.8 x 57.0 mm per cell |
-| Wall thickness | 2.0mm inner / 2.5mm outer |
+| Cell mouth | 65.6 x 58.2 mm per cell |
+| Divider walls | 4.5mm (structural, matching reference) |
+| Outer walls | 5.5mm |
+| Internal diagonal | 3.94" (100.1mm) |
+| Fan geometry | Focal-point projection (H: 34.3mm, V: 42.6mm) |
 | Target weight | ~730g per horn |
 | Material | Hyper PLA+ (Black) |
 

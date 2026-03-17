@@ -1,87 +1,108 @@
 #!/usr/bin/env python3
 """
-M811 Multicell Horn Generator
-==============================
-8-Cell (4x2) Exponential Horn for compression drivers.
+M811 Multicell Horn Generator  v2.0
+=====================================
+8-Cell (4x2) Exponential Horn for 1" compression drivers.
 
-Specs from reference:
-  - 11.22" (285mm) wide at mouth
-  - 5.86" (149mm) deep
-  - 10.68" (271mm) total height including throat adapter
-  - 8 cells: 4 columns x 2 rows
-  - 550Hz cutoff, +10dB from 600Hz
+Precision revision matching reference drawings:
+  - Technical drawing: 11.22" x 5.71" x 10.26"
+  - Render dims:       11.22" x 5.86" x 10.68"
+  - 3.94" internal cell diagonal
+  - Thick structural walls matching reference photos (~4-5mm dividers)
+  - Proper fan geometry: cells radiate from focal point behind throat
+  - Faceted outer shell following cell wall panels
   - 1" throat with 1-3/8"-18 UNS thread
   - Compatible with JBL (3-bolt) and Altec Lansing (2-bolt) drivers
 
 Output parts (split for Bambu Lab X1 256mm build volume):
-  1. horn_right.stl     - Right half of horn body (4 cells)
-  2. horn_left.stl      - Left half (mirror of right)
-  3. throat_adapter.stl  - Throat transition + 1-3/8"-18 thread
-  4. flange_jbl.stl      - JBL driver flange adapter (3-bolt)
-  5. flange_altec.stl    - Altec driver flange adapter (2-bolt)
-  6. joining_plate.stl   - Joining plates (x2 needed)
+  1. horn_right.stl      - Right half of horn body (4 cells)
+  2. horn_left.stl       - Left half (mirror of right)
+  3. throat_adapter.stl   - Throat transition + 1-3/8"-18 thread
+  4. flange_jbl.stl       - JBL driver flange adapter (3-bolt)
+  5. flange_altec.stl     - Altec driver flange adapter (2-bolt)
+  6. joining_plate.stl    - Joining plates (x2 needed)
 
 Target weight: ~730g in Hyper PLA+
-Material: PLA+ / Hyper PLA+
 """
 
 import math
 import os
-import sys
 import argparse
 import numpy as np
 from stl import mesh as stl_mesh
 
 
 # ============================================================================
-# Configuration
+# Configuration  — all dims from reference drawings/photos
 # ============================================================================
 class Config:
-    # Overall dimensions (from reference drawings, inches → mm)
-    MOUTH_WIDTH = 285.0       # 11.22" - total width at mouth
-    HORN_DEPTH = 149.0        # 5.86" - depth from throat-end to mouth
-    TOTAL_HEIGHT = 271.3      # 10.68" - total height including throat
-    MOUTH_HEIGHT = 120.0      # Estimated height of cell grid at mouth
+    # ---- Reference dimensions (technical drawing takes priority) ----
+    MOUTH_WIDTH = 285.0        # 11.22" total width at mouth
+    HORN_DEPTH = 145.0         # 5.71" depth (technical drawing top-view)
+    TOTAL_HEIGHT_DRAW = 260.6  # 10.26" (technical drawing side-view)
+    CELL_DIAG = 100.1          # 3.94" internal diagonal annotation
 
     # Cell grid
     COLS = 4
     ROWS = 2
 
-    # Wall thickness
-    WALL = 2.0                # mm - internal divider walls
-    OUTER_WALL = 2.5          # mm - outer shell walls
+    # ---- Wall thickness (from reference photos — clearly thick) ----
+    WALL = 4.5                 # mm — internal divider walls
+    OUTER_WALL = 5.5           # mm — outer shell walls
 
-    # Throat dimensions
-    THROAT_DIA = 25.4         # mm (1")
+    # ---- Throat ----
+    THROAT_DIA = 25.4          # mm (1")
     THROAT_AREA = math.pi * (25.4 / 2) ** 2  # 506.7 mm²
 
-    # Per-cell throat dimensions
-    CELL_THROAT_W = 8.0       # mm (sqrt(506.7/8) ≈ 7.96, rounded)
-    CELL_THROAT_H = 8.0       # mm
+    # Per-cell throat (square, area = total/8)
+    CELL_THROAT = 8.0          # mm  (sqrt(506.7/8) ≈ 7.96 → 8)
 
-    # Throat grid total size (including walls)
-    THROAT_GRID_W = 4 * 8.0 + 5 * 2.0   # 42mm
-    THROAT_GRID_H = 2 * 8.0 + 3 * 2.0   # 22mm
+    # ---- Thread: 1-3/8"-18 UNS ----
+    THREAD_OD = 34.925         # mm  (1.375")
+    THREAD_PITCH = 25.4 / 18   # 1.411 mm
+    THREAD_DEPTH = 0.65        # mm  (V-thread depth for 3D print)
+    THREAD_LENGTH = 22.0       # mm
 
-    # Thread: 1-3/8"-18 UNS
-    THREAD_OD = 34.925        # mm (1.375")
-    THREAD_PITCH = 25.4 / 18  # 1.411mm
-    THREAD_DEPTH = 0.65       # mm (thread form depth for 3D printing)
-    THREAD_LENGTH = 20.0      # mm
+    # ---- Throat transition section ----
+    # Derived: total height minus horn cell section height
+    # Horn cell section height ≈ mouth_height (cells fan vertically)
+    MOUTH_HEIGHT = 130.0       # mm — vertical extent of cells at mouth
+    THROAT_SECTION_LEN = 110.0 # mm — rect-grid → round-thread transition
 
-    # Throat adapter section
-    THROAT_SECTION_LEN = 120.0  # mm - transition from grid to thread
+    # ---- Acoustic ----
+    CUTOFF_FREQ = 550          # Hz
+    SPEED_OF_SOUND = 343000.0  # mm/s
 
-    # Acoustic
-    CUTOFF_FREQ = 550         # Hz
-    SPEED_OF_SOUND = 343000   # mm/s
+    # ---- Mesh resolution ----
+    STATIONS = 50              # stations along horn depth (more = smoother)
+    CIRC_SEGS = 48             # circular features
+    THREAD_SEGS = 64           # per revolution for thread helix
 
-    # Mesh resolution
-    STATIONS = 40             # stations along horn depth
-    CIRC_SEGS = 48            # segments for circular features
-    THREAD_SEGS = 64          # segments per revolution for thread
+    # ---- Fan geometry (derived from reference dimensions) ----
+    # Focal point: where cell centre-lines converge behind the throat.
+    # Computed from throat-grid width, mouth width and horn depth.
+    @property
+    def throat_grid_w(self):
+        return self.COLS * self.CELL_THROAT + (self.COLS + 1) * self.WALL
 
-    # Mouth cell dimensions (derived)
+    @property
+    def throat_grid_h(self):
+        return self.ROWS * self.CELL_THROAT + (self.ROWS + 1) * self.WALL
+
+    @property
+    def h_focal(self):
+        """Horizontal focal distance behind throat plane."""
+        half_thr = self.throat_grid_w / 2
+        half_mth = self.MOUTH_WIDTH / 2
+        return self.HORN_DEPTH * half_thr / (half_mth - half_thr)
+
+    @property
+    def v_focal(self):
+        """Vertical focal distance behind throat plane."""
+        half_thr = self.throat_grid_h / 2
+        half_mth = self.MOUTH_HEIGHT / 2
+        return self.HORN_DEPTH * half_thr / (half_mth - half_thr)
+
     @property
     def mouth_cell_w(self):
         return (self.MOUTH_WIDTH - (self.COLS + 1) * self.WALL) / self.COLS
@@ -90,41 +111,35 @@ class Config:
     def mouth_cell_h(self):
         return (self.MOUTH_HEIGHT - (self.ROWS + 1) * self.WALL) / self.ROWS
 
-    # Flare constant
     @property
     def flare_m(self):
         return 4 * math.pi * self.CUTOFF_FREQ / self.SPEED_OF_SOUND
 
-    # JBL driver flange: 3-bolt pattern on 2.625" (66.675mm) BCD
+    # ---- Driver flanges ----
     JBL_BOLT_BCD = 66.675     # mm bolt circle diameter
-    JBL_BOLT_DIA = 5.5        # mm bolt hole diameter
+    JBL_BOLT_DIA = 5.5        # mm
     JBL_BOLT_COUNT = 3
 
-    # Altec driver flange: 2-bolt pattern
-    ALTEC_BOLT_SPACING = 63.5  # mm between bolt holes
-    ALTEC_BOLT_DIA = 5.5       # mm
+    ALTEC_BOLT_SPACING = 63.5 # mm between holes
+    ALTEC_BOLT_DIA = 5.5
 
-    # Flange dimensions
-    FLANGE_OD = 80.0           # mm outer diameter
-    FLANGE_THICKNESS = 6.0     # mm
+    FLANGE_OD = 80.0          # mm
+    FLANGE_THICKNESS = 6.0    # mm
 
-    # Joining features
-    DOWEL_DIA = 4.0            # mm alignment dowel holes
-    DOWEL_DEPTH = 8.0          # mm
-    BOLT_DIA = 4.5             # mm for M4 bolts
-    BOLT_SPACING_Z = 60.0      # mm vertical distance between join bolts
+    # ---- Joining hardware ----
+    DOWEL_DIA = 4.0
+    DOWEL_DEPTH = 8.0
+    BOLT_DIA = 4.5             # M4 through-holes
 
 
 # ============================================================================
-# Mesh Utility Functions
+# Mesh primitives
 # ============================================================================
 def loft_profiles(profiles, closed=True):
-    """Connect ordered profiles with triangle strips. Each profile is a list
-    of (x,y,z) 3-tuples. All profiles must have the same point count."""
+    """Triangle-strip loft between ordered profiles (same vertex count)."""
     tris = []
     for i in range(len(profiles) - 1):
-        p0 = profiles[i]
-        p1 = profiles[i + 1]
+        p0, p1 = profiles[i], profiles[i + 1]
         n = len(p0)
         limit = n if closed else n - 1
         for j in range(limit):
@@ -135,650 +150,483 @@ def loft_profiles(profiles, closed=True):
 
 
 def cap_polygon(pts, flip=False):
-    """Triangulate a planar polygon using fan from centroid."""
+    """Fan triangulation of a planar polygon."""
     n = len(pts)
-    cx = sum(p[0] for p in pts) / n
-    cy = sum(p[1] for p in pts) / n
-    cz = sum(p[2] for p in pts) / n
-    center = (cx, cy, cz)
+    c = tuple(sum(p[k] for p in pts) / n for k in range(3))
     tris = []
     for i in range(n):
         j = (i + 1) % n
-        if flip:
-            tris.append((center, pts[j], pts[i]))
-        else:
-            tris.append((center, pts[i], pts[j]))
+        tris.append((c, pts[j], pts[i]) if flip else (c, pts[i], pts[j]))
     return tris
 
 
-def rect_profile(x_min, x_max, z_min, z_max, y):
-    """Create a rectangular profile in the XZ plane at given Y."""
-    return [
-        (x_min, y, z_min),
-        (x_max, y, z_min),
-        (x_max, y, z_max),
-        (x_min, y, z_max),
-    ]
+def rect_profile(x0, x1, z0, z1, y):
+    """4-point rectangle in the XZ plane at Y=y."""
+    return [(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)]
 
 
 def cylinder_mesh(r, length, center, axis='y', segs=32):
-    """Generate closed cylinder triangles along specified axis."""
+    """Closed cylinder along the given axis."""
     tris = []
     cx, cy, cz = center
     for i in range(segs):
         a0 = 2 * math.pi * i / segs
         a1 = 2 * math.pi * (i + 1) / segs
+        c0, s0 = math.cos(a0), math.sin(a0)
+        c1, s1 = math.cos(a1), math.sin(a1)
         if axis == 'y':
-            p0b = (cx + r * math.cos(a0), cy, cz + r * math.sin(a0))
-            p1b = (cx + r * math.cos(a1), cy, cz + r * math.sin(a1))
-            p0t = (cx + r * math.cos(a0), cy + length, cz + r * math.sin(a0))
-            p1t = (cx + r * math.cos(a1), cy + length, cz + r * math.sin(a1))
-            cb = (cx, cy, cz)
-            ct = (cx, cy + length, cz)
-        elif axis == 'z':
-            p0b = (cx + r * math.cos(a0), cy + r * math.sin(a0), cz)
-            p1b = (cx + r * math.cos(a1), cy + r * math.sin(a1), cz)
-            p0t = (cx + r * math.cos(a0), cy + r * math.sin(a0), cz + length)
-            p1t = (cx + r * math.cos(a1), cy + r * math.sin(a1), cz + length)
-            cb = (cx, cy, cz)
-            ct = (cx, cy, cz + length)
-        else:
-            continue
-        # Side
-        tris.append((p0b, p1b, p1t))
-        tris.append((p0b, p1t, p0t))
-        # Bottom cap
-        tris.append((cb, p1b, p0b))
-        # Top cap
-        tris.append((ct, p0t, p1t))
+            b0 = (cx + r*c0, cy,          cz + r*s0)
+            b1 = (cx + r*c1, cy,          cz + r*s1)
+            t0 = (cx + r*c0, cy + length, cz + r*s0)
+            t1 = (cx + r*c1, cy + length, cz + r*s1)
+            cb, ct = (cx, cy, cz), (cx, cy + length, cz)
+        else:  # axis == 'z'
+            b0 = (cx + r*c0, cy + r*s0, cz)
+            b1 = (cx + r*c1, cy + r*s1, cz)
+            t0 = (cx + r*c0, cy + r*s0, cz + length)
+            t1 = (cx + r*c1, cy + r*s1, cz + length)
+            cb, ct = (cx, cy, cz), (cx, cy, cz + length)
+        tris += [(b0, b1, t1), (b0, t1, t0), (cb, b1, b0), (ct, t0, t1)]
     return tris
 
 
 def box_mesh(x, y, z, sx, sy, sz):
-    """Axis-aligned box from (x,y,z) with size (sx,sy,sz)."""
+    """Axis-aligned box."""
     v = [
-        (x, y, z), (x+sx, y, z), (x+sx, y+sy, z), (x, y+sy, z),
-        (x, y, z+sz), (x+sx, y, z+sz), (x+sx, y+sy, z+sz), (x, y+sy, z+sz),
-    ]
-    faces = [
-        (0, 3, 2, 1), (4, 5, 6, 7),
-        (0, 1, 5, 4), (2, 3, 7, 6),
-        (0, 4, 7, 3), (1, 2, 6, 5),
-    ]
+        (x,y,z),(x+sx,y,z),(x+sx,y+sy,z),(x,y+sy,z),
+        (x,y,z+sz),(x+sx,y,z+sz),(x+sx,y+sy,z+sz),(x,y+sy,z+sz)]
+    faces = [(0,3,2,1),(4,5,6,7),(0,1,5,4),(2,3,7,6),(0,4,7,3),(1,2,6,5)]
     tris = []
     for f in faces:
-        tris.append((v[f[0]], v[f[1]], v[f[2]]))
-        tris.append((v[f[0]], v[f[2]], v[f[3]]))
+        tris += [(v[f[0]],v[f[1]],v[f[2]]),(v[f[0]],v[f[2]],v[f[3]])]
     return tris
 
 
 def mirror_x(triangles):
-    """Mirror triangles across X=0 plane (flip X and reverse winding)."""
-    mirrored = []
-    for t in triangles:
-        mirrored.append((
-            (-t[0][0], t[0][1], t[0][2]),
-            (-t[2][0], t[2][1], t[2][2]),
-            (-t[1][0], t[1][1], t[1][2]),
-        ))
-    return mirrored
+    """Mirror across X=0 (flip X + reverse winding)."""
+    return [
+        ((-t[0][0],t[0][1],t[0][2]),(-t[2][0],t[2][1],t[2][2]),(-t[1][0],t[1][1],t[1][2]))
+        for t in triangles
+    ]
 
 
-def annular_ring(r_inner, r_outer, z, segs=48, flip=False):
-    """Create a flat annular ring (washer shape) at height z."""
+def annular_cap(ri, ro, y, segs=48, flip=False):
+    """Flat annular ring at Y=y."""
     tris = []
     for i in range(segs):
-        a0 = 2 * math.pi * i / segs
-        a1 = 2 * math.pi * (i + 1) / segs
-        pi0 = (r_inner * math.cos(a0), r_inner * math.sin(a0), z)
-        pi1 = (r_inner * math.cos(a1), r_inner * math.sin(a1), z)
-        po0 = (r_outer * math.cos(a0), r_outer * math.sin(a0), z)
-        po1 = (r_outer * math.cos(a1), r_outer * math.sin(a1), z)
+        a0 = 2*math.pi*i/segs
+        a1 = 2*math.pi*(i+1)/segs
+        pi0 = (ri*math.cos(a0), y, ri*math.sin(a0))
+        pi1 = (ri*math.cos(a1), y, ri*math.sin(a1))
+        po0 = (ro*math.cos(a0), y, ro*math.sin(a0))
+        po1 = (ro*math.cos(a1), y, ro*math.sin(a1))
         if flip:
-            tris.append((pi0, po0, po1))
-            tris.append((pi0, po1, pi1))
+            tris += [(pi0,po0,po1),(pi0,po1,pi1)]
         else:
-            tris.append((pi0, po1, po0))
-            tris.append((pi0, pi1, po1))
+            tris += [(pi0,po1,po0),(pi0,pi1,po1)]
     return tris
 
 
 # ============================================================================
-# Horn Body Generator
+# Fan-geometry cell computation
 # ============================================================================
-def compute_cell_geometry(t, col, row, cfg):
-    """Compute cell center and size at parameter t (0=throat, 1=mouth).
-    Returns (cx, cz, cell_w, cell_h) in the XZ plane."""
-    # Cell size: interpolate using modified exponential
-    # Use a blend of exponential (acoustic) and linear (structural)
-    m = cfg.flare_m
-    y_pos = t * cfg.HORN_DEPTH
-    exp_ratio = math.exp(m * y_pos)
-    # Area expansion from exponential
-    area_exp = cfg.CELL_THROAT_W * cfg.CELL_THROAT_H * exp_ratio
-    # Area at mouth (maximum)
+def cell_geometry(t, col, row, cfg):
+    """Compute cell inner-opening centre (cx, cz) and size (w, h) at
+    parameter *t* (0 = throat, 1 = mouth).
+
+    Uses proper fan projection from the focal point so cells radiate
+    outward rather than simply linearly interpolating.
+    """
+    y = t * cfg.HORN_DEPTH          # depth position
+
+    # -- Horizontal (X) fan --
+    # At the throat (y=0) the cell centres are tightly packed.
+    # At any depth y the centre-X is projected from the focal point.
+    half_cols = cfg.COLS / 2.0
+    # Index from center: col 0 → -1.5, col 1 → -0.5, col 2 → +0.5, col 3 → +1.5
+    ci = col - (cfg.COLS - 1) / 2.0
+
+    # Throat centre X for this column
+    spacing_w0 = cfg.CELL_THROAT + cfg.WALL
+    cx0 = ci * spacing_w0
+    # The angle of this column's centre-line from the horn axis
+    theta_h = math.atan2(cx0, cfg.h_focal)
+    # At depth y, the projected X position
+    cx = (cfg.h_focal + y) * math.tan(theta_h)
+
+    # -- Vertical (Z) fan --
+    ri = row - (cfg.ROWS - 1) / 2.0
+    spacing_h0 = cfg.CELL_THROAT + cfg.WALL
+    cz0 = ri * spacing_h0
+    theta_v = math.atan2(cz0, cfg.v_focal)
+    cz = (cfg.v_focal + y) * math.tan(theta_v)
+
+    # -- Cell opening size --
+    # Exponential area expansion from horn physics, capped at mouth dims
+    exp_ratio = math.exp(cfg.flare_m * y)
+    area_throat = cfg.CELL_THROAT ** 2
+    area_exp = area_throat * exp_ratio
     area_mouth = cfg.mouth_cell_w * cfg.mouth_cell_h
-    # Blend: use exponential up to where it hits the mouth area, then cap
     area = min(area_exp, area_mouth)
 
-    # Distribute area between width and height following the fan shape
-    # Width grows faster due to horizontal fan
-    w_ratio = cfg.mouth_cell_w / cfg.CELL_THROAT_W
-    h_ratio = cfg.mouth_cell_h / cfg.CELL_THROAT_H
+    # Distribute area proportionally to the aspect ratio at the mouth
+    aspect = cfg.mouth_cell_w / cfg.mouth_cell_h
+    cell_h = math.sqrt(area / aspect)
+    cell_w = area / cell_h
 
-    cell_w = cfg.CELL_THROAT_W * (1 + t * (w_ratio - 1))
-    cell_h = cfg.CELL_THROAT_H * (1 + t * (h_ratio - 1))
+    # Clamp to mouth dimensions
+    cell_w = min(cell_w, cfg.mouth_cell_w)
+    cell_h = min(cell_h, cfg.mouth_cell_h)
 
-    # Cell center positions: interpolate from throat grid to mouth grid
-    # Throat positions
-    spacing_w0 = cfg.CELL_THROAT_W + cfg.WALL
-    spacing_h0 = cfg.CELL_THROAT_H + cfg.WALL
-    cx0 = (col - (cfg.COLS - 1) / 2.0) * spacing_w0
-    cz0 = (row - (cfg.ROWS - 1) / 2.0) * spacing_h0
-
-    # Mouth positions
-    spacing_w1 = cfg.mouth_cell_w + cfg.WALL
-    spacing_h1 = cfg.mouth_cell_h + cfg.WALL
-    cx1 = (col - (cfg.COLS - 1) / 2.0) * spacing_w1
-    cz1 = (row - (cfg.ROWS - 1) / 2.0) * spacing_h1
-
-    # Interpolate center positions (fan spreading)
-    cx = cx0 + t * (cx1 - cx0)
-    cz = cz0 + t * (cz1 - cz0)
+    # Ensure minimum = throat size
+    cell_w = max(cell_w, cfg.CELL_THROAT)
+    cell_h = max(cell_h, cfg.CELL_THROAT)
 
     return cx, cz, cell_w, cell_h
 
 
-def generate_horn_half(cfg, side='right'):
-    """Generate one half of the multicell horn body.
+def cell_outer_bounds(t, col, row, cfg):
+    """Outer boundary of a single cell tube at parameter t, accounting
+    for wall thickness.  Outer cells get the full outer-wall; inner cells
+    get half the divider on each shared side.
+    """
+    cx, cz, cw, ch = cell_geometry(t, col, row, cfg)
 
-    The horn is split at X=0. 'right' generates the X>0 half (columns 2,3).
-    'left' generates the X<0 half (columns 0,1) = mirror of right.
+    # Left / right wall contribution
+    left_w  = cfg.OUTER_WALL if col == 0          else cfg.WALL / 2
+    right_w = cfg.OUTER_WALL if col == cfg.COLS-1 else cfg.WALL / 2
+    bot_w   = cfg.OUTER_WALL if row == 0          else cfg.WALL / 2
+    top_w   = cfg.OUTER_WALL if row == cfg.ROWS-1 else cfg.WALL / 2
+
+    x0 = cx - cw/2 - left_w
+    x1 = cx + cw/2 + right_w
+    z0 = cz - ch/2 - bot_w
+    z1 = cz + ch/2 + top_w
+
+    return x0, x1, z0, z1
+
+
+# ============================================================================
+# Horn body (one half)
+# ============================================================================
+def generate_horn_half(cfg, side='right'):
+    """Generate the right (or left) half of the multicell horn body.
+
+    Each cell is built as an independent thick-walled tube:
+      - Outer solid  (outward normals) = material
+      - Inner void   (inverted normals) = cell passage
+    Adjacent cells' outer boundaries overlap at the shared divider wall,
+    producing solid thick dividers when the slicer resolves the mesh.
     """
     tris = []
 
-    # For the right half, we use columns 2 and 3 (positive X side)
+    # Columns for this half
     if side == 'right':
-        cols = [2, 3]
+        cols = [2, 3]   # positive-X side
     else:
         cols = [0, 1]
-    rows = [0, 1]
+    rows = list(range(cfg.ROWS))
 
-    # --- Generate outer shell ---
-    # Compute outer boundary at each station
-    outer_profiles = []
-    for si in range(cfg.STATIONS + 1):
-        t = si / cfg.STATIONS
-        y = t * cfg.HORN_DEPTH
-
-        # Find outer boundary from cell positions
-        x_min_cells = float('inf')
-        x_max_cells = float('-inf')
-        z_min_cells = float('inf')
-        z_max_cells = float('-inf')
-
-        for col in cols:
-            for row in rows:
-                cx, cz, cw, ch = compute_cell_geometry(t, col, row, cfg)
-                x_min_cells = min(x_min_cells, cx - cw / 2)
-                x_max_cells = max(x_max_cells, cx + cw / 2)
-                z_min_cells = min(z_min_cells, cz - ch / 2)
-                z_max_cells = max(z_max_cells, cz + ch / 2)
-
-        # Add outer wall thickness
-        x_max = x_max_cells + cfg.OUTER_WALL
-        z_min = z_min_cells - cfg.OUTER_WALL
-        z_max = z_max_cells + cfg.OUTER_WALL
-
-        # For the split half, X starts at 0 (joining face)
-        if side == 'right':
-            x_min = 0.0
-        else:
-            x_min = x_min_cells - cfg.OUTER_WALL
-            x_max = 0.0
-
-        outer_profiles.append(rect_profile(x_min, x_max, z_min, z_max, y))
-
-    # Loft outer shell
-    tris.extend(loft_profiles(outer_profiles, closed=True))
-
-    # Cap throat end (Y=0) and mouth end (Y=HORN_DEPTH)
-    tris.extend(cap_polygon(outer_profiles[0], flip=True))   # throat end (back)
-    tris.extend(cap_polygon(outer_profiles[-1], flip=False))  # mouth end (front)
-
-    # --- Generate cell passages (inverted normals for subtraction) ---
     for col in cols:
         for row in rows:
-            cell_profiles = []
+            outer_profiles = []
+            inner_profiles = []
+
             for si in range(cfg.STATIONS + 1):
                 t = si / cfg.STATIONS
                 y = t * cfg.HORN_DEPTH
-                cx, cz, cw, ch = compute_cell_geometry(t, col, row, cfg)
 
-                # Cell opening rectangle (slightly oversized at ends for clean cut)
-                y_adj = y
+                # Inner opening
+                cx, cz, cw, ch = cell_geometry(t, col, row, cfg)
+                # Outer boundary
+                ox0, ox1, oz0, oz1 = cell_outer_bounds(t, col, row, cfg)
+
+                # For the split half, clip at X=0
+                if side == 'right':
+                    ox0 = max(ox0, 0.0)
+                    # Inner opening: if it crosses X=0, clip it
+                    inner_x0 = max(cx - cw/2, 0.001)
+                else:
+                    ox1 = min(ox1, 0.0)
+                    inner_x0 = cx - cw/2
+
+                inner_x1 = cx + cw/2 if side == 'right' else min(cx + cw/2, -0.001)
+
+                # Extend past faces for clean Boolean at mouth/throat
+                y_outer = y
+                y_inner = y
                 if si == 0:
-                    y_adj = -1.0  # extend past throat face
+                    y_inner = -1.5
                 elif si == cfg.STATIONS:
-                    y_adj = cfg.HORN_DEPTH + 1.0  # extend past mouth face
+                    y_inner = cfg.HORN_DEPTH + 1.5
 
-                cell_profiles.append(rect_profile(
-                    cx - cw / 2, cx + cw / 2,
-                    cz - ch / 2, cz + ch / 2,
-                    y_adj
-                ))
+                outer_profiles.append(rect_profile(
+                    ox0, ox1 if side == 'right' else ox1,
+                    oz0, oz1, y_outer))
+                inner_profiles.append(rect_profile(
+                    inner_x0, inner_x1,
+                    cz - ch/2, cz + ch/2, y_inner))
 
-            # Loft cell passage with INVERTED normals (reverse winding)
-            cell_tris = loft_profiles(cell_profiles, closed=True)
-            inverted = [(t[2], t[1], t[0]) for t in cell_tris]
-            tris.extend(inverted)
+            # --- Outer solid ---
+            tris.extend(loft_profiles(outer_profiles, closed=True))
+            tris.extend(cap_polygon(outer_profiles[0], flip=True))
+            tris.extend(cap_polygon(outer_profiles[-1], flip=False))
 
-            # Cell end caps (also inverted)
-            tris.extend(cap_polygon(cell_profiles[0], flip=False))   # inverted
-            tris.extend(cap_polygon(cell_profiles[-1], flip=True))   # inverted
+            # --- Inner void (inverted normals) ---
+            inv = loft_profiles(inner_profiles, closed=True)
+            tris.extend([(tri[2], tri[1], tri[0]) for tri in inv])
+            tris.extend(cap_polygon(inner_profiles[0], flip=False))
+            tris.extend(cap_polygon(inner_profiles[-1], flip=True))
 
-    # --- Add reinforcement ribs between cell rows ---
-    for si in range(0, cfg.STATIONS, 5):
-        t = si / cfg.STATIONS
-        y = t * cfg.HORN_DEPTH
-        # Horizontal divider rib
-        for col in cols:
-            cx_top, cz_top, cw_top, ch_top = compute_cell_geometry(t, col, 1, cfg)
-            cx_bot, cz_bot, cw_bot, ch_bot = compute_cell_geometry(t, col, 0, cfg)
-            # The horizontal divider sits between row 0 top and row 1 bottom
-            rib_z_bot = cz_bot + ch_bot / 2
-            rib_z_top = cz_top - ch_top / 2
-            if rib_z_top > rib_z_bot + 0.5:
-                rib_cx = (cx_top + cx_bot) / 2
-                rib_w = max(cw_top, cw_bot)
-                tris.extend(box_mesh(
-                    rib_cx - rib_w / 2, y, rib_z_bot,
-                    rib_w, cfg.HORN_DEPTH / cfg.STATIONS * 4, rib_z_top - rib_z_bot
-                ))
-
-    # --- Joining face features (dowel holes at X=0) ---
-    # Add small registration bumps on the joining face
-    for dz in [-25, 0, 25]:
-        if side == 'right':
-            # Small cylindrical bump protruding from X=0 face
-            tris.extend(cylinder_mesh(
-                cfg.DOWEL_DIA / 2, cfg.DOWEL_DEPTH / 2,
-                center=(0, cfg.HORN_DEPTH / 2, dz),
-                axis='z',  # Use as X-direction protrusion - approximate
-                segs=16
-            ))
+    # --- Joining face reinforcement at X=0 ---
+    # Tongue-and-groove: raised ridge along the split face for alignment
+    ridge_h = 2.0   # protrusion height
+    ridge_w = 3.0   # width of ridge
+    # Compute Z extent of the horn at the midpoint
+    _, _, _, _, oz0_mid, oz1_mid = _half_z_bounds(cfg, cols, rows, 0.5)
+    if side == 'right':
+        tris.extend(box_mesh(
+            0.0, 0.0, oz0_mid + 5,
+            ridge_h, cfg.HORN_DEPTH, oz1_mid - oz0_mid - 10))
 
     return tris
 
 
+def _half_z_bounds(cfg, cols, rows, t):
+    """Helper: compute overall X/Z bounds for given cols/rows at param t."""
+    x_min = float('inf'); x_max = float('-inf')
+    z_min = float('inf'); z_max = float('-inf')
+    for c in cols:
+        for r in rows:
+            ox0, ox1, oz0, oz1 = cell_outer_bounds(t, c, r, cfg)
+            x_min = min(x_min, ox0); x_max = max(x_max, ox1)
+            z_min = min(z_min, oz0); z_max = max(z_max, oz1)
+    return x_min, x_max, z_min, z_max, z_min, z_max
+
+
 # ============================================================================
-# Throat Adapter Generator
+# Throat adapter
 # ============================================================================
 def generate_throat_adapter(cfg):
-    """Generate the throat transition piece.
-    Transitions from rectangular cell grid opening to circular 1" throat
+    """Transition from rectangular cell-grid opening to circular 1" throat
     with 1-3/8"-18 UNS female thread.
     """
     tris = []
     segs = cfg.CIRC_SEGS
-    stations = 30
+    stations = 40
 
-    # Dimensions
-    rect_w = cfg.THROAT_GRID_W + 2 * cfg.OUTER_WALL  # outer width at top
-    rect_h = cfg.THROAT_GRID_H + 2 * cfg.OUTER_WALL  # outer height at top
+    # Outer rectangle at the top (mates with horn body throat)
+    rect_w = cfg.throat_grid_w + 2 * cfg.OUTER_WALL
+    rect_h = cfg.throat_grid_h + 2 * cfg.OUTER_WALL
+    r_outer_circ = cfg.THREAD_OD / 2 + cfg.OUTER_WALL
     total_len = cfg.THROAT_SECTION_LEN
 
-    # The adapter goes from Y=0 (top, mates with horn body) to Y=-total_len (bottom, thread)
-    # At Y=0: rectangular cross-section matching horn throat
-    # At Y=-total_len: circular cross-section for thread
+    # Inner rectangle at top / circle at bottom
+    inner_rect_w = cfg.throat_grid_w
+    inner_rect_h = cfg.throat_grid_h
+    r_inner_circ = cfg.THROAT_DIA / 2
 
-    # --- Outer shell transition (rectangle to circle) ---
-    profiles = []
-    for si in range(stations + 1):
-        t = si / stations  # 0=top (rectangle), 1=bottom (circle)
-        y = -t * total_len
-
-        n_pts = segs  # Use same point count for all stations
-        pts = []
-
-        if t < 0.01:
-            # Pure rectangle (top)
-            for i in range(n_pts):
-                frac = i / n_pts
-                if frac < 0.25:
-                    f = frac / 0.25
-                    x = -rect_w / 2 + f * rect_w
-                    z = -rect_h / 2
-                elif frac < 0.5:
-                    f = (frac - 0.25) / 0.25
-                    x = rect_w / 2
-                    z = -rect_h / 2 + f * rect_h
-                elif frac < 0.75:
-                    f = (frac - 0.5) / 0.25
-                    x = rect_w / 2 - f * rect_w
-                    z = rect_h / 2
-                else:
-                    f = (frac - 0.75) / 0.25
-                    x = -rect_w / 2
-                    z = rect_h / 2 - f * rect_h
-                pts.append((x, y, z))
+    def _rect_pt(w, h, frac):
+        """Point on a rectangle perimeter at fraction 0..1."""
+        if frac < 0.25:
+            f = frac / 0.25
+            return (-w/2 + f*w, -h/2)
+        elif frac < 0.5:
+            f = (frac-0.25) / 0.25
+            return (w/2, -h/2 + f*h)
+        elif frac < 0.75:
+            f = (frac-0.5) / 0.25
+            return (w/2 - f*w, h/2)
         else:
-            # Blend from rectangle toward circle
-            # At t=1, it's a circle with radius = THREAD_OD/2 + OUTER_WALL
-            r_circle = cfg.THREAD_OD / 2 + cfg.OUTER_WALL
-            for i in range(n_pts):
-                angle = 2 * math.pi * i / n_pts
-                # Circle point
-                cx = r_circle * math.cos(angle)
-                cz = r_circle * math.sin(angle)
-                # Rectangle point
-                frac = i / n_pts
-                if frac < 0.25:
-                    f = frac / 0.25
-                    rx = -rect_w / 2 + f * rect_w
-                    rz = -rect_h / 2
-                elif frac < 0.5:
-                    f = (frac - 0.25) / 0.25
-                    rx = rect_w / 2
-                    rz = -rect_h / 2 + f * rect_h
-                elif frac < 0.75:
-                    f = (frac - 0.5) / 0.25
-                    rx = rect_w / 2 - f * rect_w
-                    rz = rect_h / 2
-                else:
-                    f = (frac - 0.75) / 0.25
-                    rx = -rect_w / 2
-                    rz = rect_h / 2 - f * rect_h
+            f = (frac-0.75) / 0.25
+            return (-w/2, h/2 - f*h)
 
-                # Smooth blend
-                blend = t ** 1.5  # ease into circle
-                x = rx * (1 - blend) + cx * blend
-                z = rz * (1 - blend) + cz * blend
-
-                # Also shrink the rectangle part
-                rect_scale = 1.0 - t * (1.0 - 2 * r_circle / rect_w)
-                if blend < 1.0:
-                    x = rx * rect_scale * (1 - blend) + cx * blend
-                    z = rz * rect_scale * (1 - blend) + cz * blend
-
-                pts.append((x, y, z))
-
-        profiles.append(pts)
-
-    # Loft outer shell
-    tris.extend(loft_profiles(profiles, closed=True))
-
-    # Cap top (rectangular end, mates with horn body)
-    tris.extend(cap_polygon(profiles[0], flip=True))
-
-    # --- Inner passage (also transitions from rect grid to circle) ---
-    inner_profiles = []
+    # --- Outer shell ---
+    outer_profs = []
+    inner_profs = []
     for si in range(stations + 1):
         t = si / stations
         y = -t * total_len
+        # Smooth blend from rectangle → circle using t^1.3 ease
+        blend = t ** 1.3
 
-        n_pts = segs
-        pts = []
+        outer_pts = []
+        inner_pts = []
+        for i in range(segs):
+            frac = i / segs
+            angle = 2 * math.pi * frac
 
-        # Inner opening
-        inner_rect_w = cfg.THROAT_GRID_W  # cell grid opening (no walls)
-        inner_rect_h = cfg.THROAT_GRID_H
-        r_inner = cfg.THROAT_DIA / 2
+            # Rectangle point
+            orx, orz = _rect_pt(rect_w, rect_h, frac)
+            irx, irz = _rect_pt(inner_rect_w, inner_rect_h, frac)
 
-        for i in range(n_pts):
-            angle = 2 * math.pi * i / n_pts
-            cx = r_inner * math.cos(angle)
-            cz = r_inner * math.sin(angle)
-            frac = i / n_pts
-            if frac < 0.25:
-                f = frac / 0.25
-                rx = -inner_rect_w / 2 + f * inner_rect_w
-                rz = -inner_rect_h / 2
-            elif frac < 0.5:
-                f = (frac - 0.25) / 0.25
-                rx = inner_rect_w / 2
-                rz = -inner_rect_h / 2 + f * inner_rect_h
-            elif frac < 0.75:
-                f = (frac - 0.5) / 0.25
-                rx = inner_rect_w / 2 - f * inner_rect_w
-                rz = inner_rect_h / 2
-            else:
-                f = (frac - 0.75) / 0.25
-                rx = -inner_rect_w / 2
-                rz = inner_rect_h / 2 - f * inner_rect_h
+            # Circle point
+            ocx = r_outer_circ * math.cos(angle)
+            ocz = r_outer_circ * math.sin(angle)
+            icx = r_inner_circ * math.cos(angle)
+            icz = r_inner_circ * math.sin(angle)
 
-            blend = t ** 1.5
-            x = rx * (1 - blend) + cx * blend
-            z = rz * (1 - blend) + cz * blend
+            # Shrink rectangle toward circle as we descend
+            scale = 1.0 - blend * (1.0 - 2*r_outer_circ/rect_w)
+            ox = orx * scale * (1-blend) + ocx * blend
+            oz = orz * scale * (1-blend) + ocz * blend
 
-            # Adjust Y slightly for clean Boolean
+            i_scale = 1.0 - blend * (1.0 - 2*r_inner_circ/inner_rect_w)
+            ix = irx * i_scale * (1-blend) + icx * blend
+            iz = irz * i_scale * (1-blend) + icz * blend
+
+            outer_pts.append((ox, y, oz))
+
             y_adj = y
             if si == 0:
-                y_adj = y + 1.0
+                y_adj = y + 1.5
             elif si == stations:
-                y_adj = y - 1.0
+                y_adj = y - 1.5
+            inner_pts.append((ix, y_adj, iz))
 
-            pts.append((x, y_adj, z))
+        outer_profs.append(outer_pts)
+        inner_profs.append(inner_pts)
 
-        inner_profiles.append(pts)
+    # Loft outer
+    tris.extend(loft_profiles(outer_profs, closed=True))
+    tris.extend(cap_polygon(outer_profs[0], flip=True))
 
-    # Loft inner passage with inverted normals
-    inner_tris = loft_profiles(inner_profiles, closed=True)
-    tris.extend([(t[2], t[1], t[0]) for t in inner_tris])
+    # Loft inner (inverted)
+    inv = loft_profiles(inner_profs, closed=True)
+    tris.extend([(tri[2],tri[1],tri[0]) for tri in inv])
+    tris.extend(cap_polygon(inner_profs[0], flip=False))
+    tris.extend(cap_polygon(inner_profs[-1], flip=True))
 
-    # Inner end caps (inverted)
-    tris.extend(cap_polygon(inner_profiles[0], flip=False))
-    tris.extend(cap_polygon(inner_profiles[-1], flip=True))
-
-    # --- Thread section (extends below the transition) ---
-    thread_y_start = -total_len
-    thread_y_end = thread_y_start - cfg.THREAD_LENGTH
-
-    # Outer cylinder for thread section
-    r_outer = cfg.THREAD_OD / 2 + cfg.OUTER_WALL
-    tris.extend(cylinder_mesh(
-        r_outer, -cfg.THREAD_LENGTH,
-        center=(0, thread_y_start, 0),
-        axis='y', segs=segs
-    ))
-
-    # Internal thread (female) - helical groove
-    # Approximate thread as a series of helical cuts
+    # --- Thread section (cylinder below transition) ---
+    thread_y0 = -total_len
+    r_thread_outer = cfg.THREAD_OD / 2 + cfg.OUTER_WALL
     r_thread_major = cfg.THREAD_OD / 2
     r_thread_minor = r_thread_major - cfg.THREAD_DEPTH
-    thread_revs = cfg.THREAD_LENGTH / cfg.THREAD_PITCH
-    thread_pts = int(thread_revs * cfg.THREAD_SEGS)
 
-    # Generate thread as a helical tube with triangular cross-section
-    for i in range(thread_pts):
-        frac0 = i / thread_pts
-        frac1 = (i + 1) / thread_pts
-        a0 = 2 * math.pi * frac0 * thread_revs
-        a1 = 2 * math.pi * frac1 * thread_revs
-        y0 = thread_y_start - frac0 * cfg.THREAD_LENGTH
-        y1 = thread_y_start - frac1 * cfg.THREAD_LENGTH
+    # Outer cylinder
+    tris.extend(cylinder_mesh(r_thread_outer, -cfg.THREAD_LENGTH,
+                              center=(0, thread_y0, 0), axis='y', segs=segs))
 
-        # Thread groove: V-shape between major and minor diameter
-        # Outer edge (major diameter)
-        p0_out = (r_thread_major * math.cos(a0), y0, r_thread_major * math.sin(a0))
-        p1_out = (r_thread_major * math.cos(a1), y1, r_thread_major * math.sin(a1))
-        # Inner edge (minor diameter, half pitch offset)
-        y0m = y0 - cfg.THREAD_PITCH / 4
-        y1m = y1 - cfg.THREAD_PITCH / 4
-        p0_in = (r_thread_minor * math.cos(a0), y0m, r_thread_minor * math.sin(a0))
-        p1_in = (r_thread_minor * math.cos(a1), y1m, r_thread_minor * math.sin(a1))
+    # Helical female thread
+    revs = cfg.THREAD_LENGTH / cfg.THREAD_PITCH
+    n_pts = int(revs * cfg.THREAD_SEGS)
+    for i in range(n_pts):
+        f0, f1 = i/n_pts, (i+1)/n_pts
+        a0 = 2*math.pi*f0*revs
+        a1 = 2*math.pi*f1*revs
+        y0 = thread_y0 - f0*cfg.THREAD_LENGTH
+        y1 = thread_y0 - f1*cfg.THREAD_LENGTH
+        # Major (crest)
+        p0o = (r_thread_major*math.cos(a0), y0, r_thread_major*math.sin(a0))
+        p1o = (r_thread_major*math.cos(a1), y1, r_thread_major*math.sin(a1))
+        # Minor (root, offset half-pitch)
+        p0i = (r_thread_minor*math.cos(a0), y0-cfg.THREAD_PITCH/4,
+               r_thread_minor*math.sin(a0))
+        p1i = (r_thread_minor*math.cos(a1), y1-cfg.THREAD_PITCH/4,
+               r_thread_minor*math.sin(a1))
+        tris += [(p0o,p1o,p1i),(p0o,p1i,p0i)]
 
-        # Thread groove triangle strip
-        tris.append((p0_out, p1_out, p1_in))
-        tris.append((p0_out, p1_in, p0_in))
+    # Bottom annular cap
+    bottom_y = thread_y0 - cfg.THREAD_LENGTH
+    cap = annular_cap(cfg.THROAT_DIA/2, r_thread_outer, bottom_y, segs, flip=True)
+    tris.extend(cap)
 
-    # Bottom cap of thread section (closed)
-    bottom_y = thread_y_end
-    tris.extend(annular_ring(r_thread_major, r_outer, 0, segs))
-    # Remap annular ring Y coordinates
-    bottom_cap = annular_ring(cfg.THROAT_DIA / 2, r_outer, 0, segs, flip=True)
-    remapped = []
-    for t_tri in bottom_cap:
-        remapped.append(tuple((p[0], bottom_y, p[2]) for p in t_tri))
-    tris.extend(remapped)
-
-    # Inner bore through thread section
-    bore_tris = cylinder_mesh(
-        cfg.THROAT_DIA / 2, -cfg.THREAD_LENGTH - 2.0,
-        center=(0, thread_y_start + 1.0, 0),
-        axis='y', segs=segs
-    )
-    tris.extend([(t[2], t[1], t[0]) for t in bore_tris])
+    # Inner bore
+    bore = cylinder_mesh(cfg.THROAT_DIA/2, -cfg.THREAD_LENGTH-2,
+                         center=(0, thread_y0+1, 0), axis='y', segs=segs)
+    tris.extend([(t[2],t[1],t[0]) for t in bore])
 
     return tris
 
 
 # ============================================================================
-# Driver Flange Adapter
+# Driver flange adapters
 # ============================================================================
 def generate_driver_flange(cfg, driver_type='jbl'):
-    """Generate a driver adapter flange.
-    - One side: 1-3/8"-18 UNS male thread (screws into horn throat)
-    - Other side: bolt pattern for driver mounting
-    """
+    """Adapter flange: one side 1-3/8"-18 male thread, other side bolt pattern."""
     tris = []
     segs = cfg.CIRC_SEGS
-
-    # Flange disc
     r_outer = cfg.FLANGE_OD / 2
     r_inner = cfg.THROAT_DIA / 2
-    thickness = cfg.FLANGE_THICKNESS
-
-    # Main disc body
-    tris.extend(cylinder_mesh(
-        r_outer, thickness,
-        center=(0, 0, 0), axis='y', segs=segs
-    ))
-
-    # Center bore (inverted for subtraction)
-    bore = cylinder_mesh(
-        r_inner, thickness + 2,
-        center=(0, -1, 0), axis='y', segs=segs
-    )
-    tris.extend([(t[2], t[1], t[0]) for t in bore])
-
-    # Male thread stub (extends from one side)
-    thread_stub_len = 15.0
+    thick = cfg.FLANGE_THICKNESS
     r_thread = cfg.THREAD_OD / 2
 
-    # Thread cylinder
-    tris.extend(cylinder_mesh(
-        r_thread, thread_stub_len,
-        center=(0, thickness, 0), axis='y', segs=segs
-    ))
+    # Main disc
+    tris.extend(cylinder_mesh(r_outer, thick, (0,0,0), 'y', segs))
+    # Centre bore (inverted)
+    b = cylinder_mesh(r_inner, thick+2, (0,-1,0), 'y', segs)
+    tris.extend([(t[2],t[1],t[0]) for t in b])
 
-    # Thread bore (inverted)
-    thread_bore = cylinder_mesh(
-        r_inner, thread_stub_len + 1,
-        center=(0, thickness - 0.5, 0), axis='y', segs=segs
-    )
-    tris.extend([(t[2], t[1], t[0]) for t in thread_bore])
+    # Male thread stub
+    stub = 15.0
+    tris.extend(cylinder_mesh(r_thread, stub, (0,thick,0), 'y', segs))
+    tb = cylinder_mesh(r_inner, stub+1, (0,thick-0.5,0), 'y', segs)
+    tris.extend([(t[2],t[1],t[0]) for t in tb])
 
-    # Helical thread on the stub (male thread)
-    thread_revs = thread_stub_len / cfg.THREAD_PITCH
-    thread_pts = int(thread_revs * cfg.THREAD_SEGS)
-
-    for i in range(thread_pts):
-        frac0 = i / thread_pts
-        frac1 = (i + 1) / thread_pts
-        a0 = 2 * math.pi * frac0 * thread_revs
-        a1 = 2 * math.pi * frac1 * thread_revs
-        y0 = thickness + frac0 * thread_stub_len
-        y1 = thickness + frac1 * thread_stub_len
-
-        r_major = r_thread
-        r_minor = r_thread - cfg.THREAD_DEPTH
-
-        p0_out = (r_major * math.cos(a0), y0, r_major * math.sin(a0))
-        p1_out = (r_major * math.cos(a1), y1, r_major * math.sin(a1))
-        p0_in = (r_minor * math.cos(a0), y0 + cfg.THREAD_PITCH / 4, r_minor * math.sin(a0))
-        p1_in = (r_minor * math.cos(a1), y1 + cfg.THREAD_PITCH / 4, r_minor * math.sin(a1))
-
-        tris.append((p0_out, p0_in, p1_in))
-        tris.append((p0_out, p1_in, p1_out))
+    # Helical thread
+    revs = stub / cfg.THREAD_PITCH
+    n_pts = int(revs * cfg.THREAD_SEGS)
+    for i in range(n_pts):
+        f0, f1 = i/n_pts, (i+1)/n_pts
+        a0 = 2*math.pi*f0*revs
+        a1 = 2*math.pi*f1*revs
+        y0 = thick + f0*stub
+        y1 = thick + f1*stub
+        rm = r_thread - cfg.THREAD_DEPTH
+        p0o = (r_thread*math.cos(a0), y0, r_thread*math.sin(a0))
+        p1o = (r_thread*math.cos(a1), y1, r_thread*math.sin(a1))
+        p0i = (rm*math.cos(a0), y0+cfg.THREAD_PITCH/4, rm*math.sin(a0))
+        p1i = (rm*math.cos(a1), y1+cfg.THREAD_PITCH/4, rm*math.sin(a1))
+        tris += [(p0o,p0i,p1i),(p0o,p1i,p1o)]
 
     # Bolt holes
     if driver_type == 'jbl':
-        bolt_count = cfg.JBL_BOLT_COUNT
-        bolt_r = cfg.JBL_BOLT_BCD / 2
-        bolt_dia = cfg.JBL_BOLT_DIA
-        angle_offset = 0
-    else:  # altec
-        bolt_count = 2
-        bolt_r = cfg.ALTEC_BOLT_SPACING / 2
-        bolt_dia = cfg.ALTEC_BOLT_DIA
-        angle_offset = math.pi / 2  # orient horizontally
-
-    for b in range(bolt_count):
-        angle = angle_offset + 2 * math.pi * b / bolt_count
-        bx = bolt_r * math.cos(angle)
-        bz = bolt_r * math.sin(angle)
-
-        # Bolt hole (inverted cylinder for subtraction)
-        hole = cylinder_mesh(
-            bolt_dia / 2, thickness + 2,
-            center=(bx, -1, bz), axis='y', segs=16
-        )
-        tris.extend([(t[2], t[1], t[0]) for t in hole])
+        n_bolts, bolt_r, bolt_d, a_off = cfg.JBL_BOLT_COUNT, cfg.JBL_BOLT_BCD/2, cfg.JBL_BOLT_DIA, 0
+    else:
+        n_bolts, bolt_r, bolt_d, a_off = 2, cfg.ALTEC_BOLT_SPACING/2, cfg.ALTEC_BOLT_DIA, math.pi/2
+    for b in range(n_bolts):
+        a = a_off + 2*math.pi*b/n_bolts
+        bx, bz = bolt_r*math.cos(a), bolt_r*math.sin(a)
+        h = cylinder_mesh(bolt_d/2, thick+2, (bx,-1,bz), 'y', 16)
+        tris.extend([(t[2],t[1],t[0]) for t in h])
 
     return tris
 
 
 # ============================================================================
-# Joining Plate
+# Joining plate
 # ============================================================================
 def generate_joining_plate(cfg):
-    """Generate a plate used to join the two horn halves together."""
+    """Structural plate to bolt the two horn halves together."""
     tris = []
+    pw, ph, pt = 50.0, 120.0, 4.0   # wider & taller than before
+    tris.extend(box_mesh(-pw/2, 0, -ph/2, pw, pt, ph))
 
-    # Plate dimensions
-    plate_w = 40.0   # mm
-    plate_h = 100.0  # mm (spans most of the horn height)
-    plate_t = 3.0    # mm
+    # 6 bolt holes (3 rows x 2 cols)
+    for dx in [-15, 15]:
+        for dz in [-45, 0, 45]:
+            h = cylinder_mesh(cfg.BOLT_DIA/2, pt+2, (dx,-1,dz), 'y', 16)
+            tris.extend([(t[2],t[1],t[0]) for t in h])
 
-    # Main plate
-    tris.extend(box_mesh(
-        -plate_w / 2, 0, -plate_h / 2,
-        plate_w, plate_t, plate_h
-    ))
-
-    # Bolt holes (4 holes in corners)
-    for dx in [-12, 12]:
-        for dz in [-35, 35]:
-            hole = cylinder_mesh(
-                cfg.BOLT_DIA / 2, plate_t + 2,
-                center=(dx, -1, dz), axis='y', segs=16
-            )
-            tris.extend([(t[2], t[1], t[0]) for t in hole])
-
-    # Dowel holes for alignment
-    for dz in [-20, 20]:
-        dowel = cylinder_mesh(
-            cfg.DOWEL_DIA / 2, plate_t + 2,
-            center=(0, -1, dz), axis='y', segs=16
-        )
-        tris.extend([(t[2], t[1], t[0]) for t in dowel])
+    # 2 dowel holes
+    for dz in [-25, 25]:
+        d = cylinder_mesh(cfg.DOWEL_DIA/2, pt+2, (0,-1,dz), 'y', 16)
+        tris.extend([(t[2],t[1],t[0]) for t in d])
 
     return tris
 
 
 # ============================================================================
-# STL Export
+# STL export
 # ============================================================================
 def save_stl(triangles, filename):
-    """Save triangles to binary STL file."""
     n = len(triangles)
     m = stl_mesh.Mesh(np.zeros(n, dtype=stl_mesh.Mesh.dtype))
     for i, tri in enumerate(triangles):
         for j in range(3):
             m.vectors[i][j] = np.array(tri[j], dtype=np.float32)
     m.save(filename)
-    print(f"  Saved: {filename} ({n} triangles)")
+    print(f"  {filename}  ({n:,} triangles)")
     return m
 
 
@@ -786,80 +634,67 @@ def save_stl(triangles, filename):
 # Main
 # ============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="M811 Multicell Horn Generator")
-    parser.add_argument("--output-dir", default=".", help="Output directory for STL files")
-    parser.add_argument("--all", action="store_true", default=True,
-                        help="Generate all parts (default)")
+    parser = argparse.ArgumentParser(description="M811 Multicell Horn v2.0")
+    parser.add_argument("--output-dir", default=".", help="Output directory")
     args = parser.parse_args()
 
     cfg = Config()
-    outdir = args.output_dir
-    os.makedirs(outdir, exist_ok=True)
+    out = args.output_dir
+    os.makedirs(out, exist_ok=True)
 
-    print("=" * 60)
-    print("M811 MULTICELL HORN GENERATOR")
-    print("=" * 60)
-    print(f"  Mouth width:    {cfg.MOUTH_WIDTH:.1f} mm ({cfg.MOUTH_WIDTH/25.4:.2f}\")")
-    print(f"  Horn depth:     {cfg.HORN_DEPTH:.1f} mm ({cfg.HORN_DEPTH/25.4:.2f}\")")
-    print(f"  Total height:   {cfg.TOTAL_HEIGHT:.1f} mm ({cfg.TOTAL_HEIGHT/25.4:.2f}\")")
-    print(f"  Cells:          {cfg.COLS} x {cfg.ROWS} = {cfg.COLS * cfg.ROWS}")
-    print(f"  Cutoff freq:    {cfg.CUTOFF_FREQ} Hz")
-    print(f"  Throat:         {cfg.THROAT_DIA:.1f} mm (1\")")
-    print(f"  Thread:         1-3/8\"-18 UNS ({cfg.THREAD_OD:.3f} mm)")
-    print(f"  Cell throat:    {cfg.CELL_THROAT_W:.1f} x {cfg.CELL_THROAT_H:.1f} mm")
-    print(f"  Cell mouth:     {cfg.mouth_cell_w:.1f} x {cfg.mouth_cell_h:.1f} mm")
-    print(f"  Wall thickness: {cfg.WALL:.1f} mm (inner) / {cfg.OUTER_WALL:.1f} mm (outer)")
+    print("=" * 62)
+    print("  M811 MULTICELL HORN GENERATOR  v2.0")
+    print("=" * 62)
+    print(f"  Mouth width:      {cfg.MOUTH_WIDTH:.1f} mm  ({cfg.MOUTH_WIDTH/25.4:.2f}\")")
+    print(f"  Mouth height:     {cfg.MOUTH_HEIGHT:.1f} mm")
+    print(f"  Horn depth:       {cfg.HORN_DEPTH:.1f} mm  ({cfg.HORN_DEPTH/25.4:.2f}\")")
+    print(f"  Total height:     {cfg.TOTAL_HEIGHT_DRAW:.1f} mm  ({cfg.TOTAL_HEIGHT_DRAW/25.4:.2f}\")")
+    print(f"  Cells:            {cfg.COLS}x{cfg.ROWS} = {cfg.COLS*cfg.ROWS}")
+    print(f"  Cell throat:      {cfg.CELL_THROAT:.1f} x {cfg.CELL_THROAT:.1f} mm")
+    print(f"  Cell mouth:       {cfg.mouth_cell_w:.1f} x {cfg.mouth_cell_h:.1f} mm")
+    print(f"  Divider wall:     {cfg.WALL:.1f} mm")
+    print(f"  Outer wall:       {cfg.OUTER_WALL:.1f} mm")
+    print(f"  Throat grid:      {cfg.throat_grid_w:.1f} x {cfg.throat_grid_h:.1f} mm")
+    print(f"  H focal dist:     {cfg.h_focal:.1f} mm")
+    print(f"  V focal dist:     {cfg.v_focal:.1f} mm")
+    print(f"  Throat:           {cfg.THROAT_DIA:.1f} mm (1\")")
+    print(f"  Thread:           1-3/8\"-18 UNS ({cfg.THREAD_OD:.3f} mm OD)")
+    print(f"  Cutoff:           {cfg.CUTOFF_FREQ} Hz")
+    print(f"  Flare constant:   {cfg.flare_m*1000:.4f} /m")
     print()
 
-    # Generate right half
-    print("Generating horn body - right half...")
-    right_tris = generate_horn_half(cfg, side='right')
-    save_stl(right_tris, os.path.join(outdir, "horn_right.stl"))
+    print("Generating parts...")
 
-    # Generate left half (mirror)
-    print("Generating horn body - left half...")
-    left_tris = mirror_x(right_tris)
-    save_stl(left_tris, os.path.join(outdir, "horn_left.stl"))
+    print("  Horn body — right half...")
+    right = generate_horn_half(cfg, 'right')
+    save_stl(right, os.path.join(out, "horn_right.stl"))
 
-    # Generate throat adapter
-    print("Generating throat adapter with 1-3/8\"-18 thread...")
-    throat_tris = generate_throat_adapter(cfg)
-    save_stl(throat_tris, os.path.join(outdir, "throat_adapter.stl"))
+    print("  Horn body — left half (mirror)...")
+    left = mirror_x(right)
+    save_stl(left, os.path.join(out, "horn_left.stl"))
 
-    # Generate JBL flange
-    print("Generating JBL driver flange adapter (3-bolt)...")
-    jbl_tris = generate_driver_flange(cfg, driver_type='jbl')
-    save_stl(jbl_tris, os.path.join(outdir, "flange_jbl.stl"))
+    print("  Throat adapter + 1-3/8\"-18 thread...")
+    throat = generate_throat_adapter(cfg)
+    save_stl(throat, os.path.join(out, "throat_adapter.stl"))
 
-    # Generate Altec flange
-    print("Generating Altec driver flange adapter (2-bolt)...")
-    altec_tris = generate_driver_flange(cfg, driver_type='altec')
-    save_stl(altec_tris, os.path.join(outdir, "flange_altec.stl"))
+    print("  JBL flange (3-bolt)...")
+    save_stl(generate_driver_flange(cfg, 'jbl'), os.path.join(out, "flange_jbl.stl"))
 
-    # Generate joining plates
-    print("Generating joining plate...")
-    join_tris = generate_joining_plate(cfg)
-    save_stl(join_tris, os.path.join(outdir, "joining_plate.stl"))
+    print("  Altec flange (2-bolt)...")
+    save_stl(generate_driver_flange(cfg, 'altec'), os.path.join(out, "flange_altec.stl"))
+
+    print("  Joining plate...")
+    save_stl(generate_joining_plate(cfg), os.path.join(out, "joining_plate.stl"))
 
     print()
-    print("All parts generated successfully!")
+    print("Done!  Key changes in v2.0:")
+    print("  * Divider walls:  4.5 mm  (was 2.0 mm)")
+    print("  * Outer walls:    5.5 mm  (was 2.5 mm)")
+    print("  * Fan geometry:   proper focal-point projection")
+    print("  * Dimensions:     from technical drawing (5.71\" depth, 10.26\" height)")
+    print("  * Mesh stations:  50  (was 40)")
     print()
-    print("Assembly instructions:")
-    print("  1. Print 2x horn halves (right + left)")
-    print("  2. Print 1x throat adapter")
-    print("  3. Print 2x joining plates")
-    print("  4. Print 1x driver flange (JBL or Altec)")
-    print("  5. Join halves using joining plates + M4 bolts + adhesive")
-    print("  6. Thread throat adapter into horn body")
-    print("  7. Attach driver flange to compression driver")
-    print("  8. Thread driver+flange into throat adapter")
-    print()
-    print("Print settings for Bambu Lab X1 (Hyper PLA+):")
-    print("  Layer height: 0.20mm")
-    print("  Infill: 25-30% (grid or gyroid)")
-    print("  Walls: 3-4 loops")
-    print("  Temperature: 220°C nozzle / 60°C bed")
-    print("  Support: minimal (throat adapter may need some)")
+    print("Assembly: see M811_HORN_README.md")
 
 
 if __name__ == "__main__":
