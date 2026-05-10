@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { useState } from "react";
 import clsx from "clsx";
-import { dailySeries } from "@/lib/mock-data";
+import type { DailyPoint } from "@/lib/mock-data";
 import { dateLabel, fmtRoas, fmtUSD } from "@/lib/format";
 
 type Metric = "spend" | "revenue" | "roas";
@@ -23,10 +23,10 @@ const metrics: { key: Metric; label: string }[] = [
   { key: "roas", label: "ROAS" },
 ];
 
-export function PerformanceChart() {
+export function PerformanceChart({ daily }: { daily: DailyPoint[] }) {
   const [metric, setMetric] = useState<Metric>("revenue");
 
-  const data = dailySeries.map((d) => ({
+  const data = daily.map((d) => ({
     ...d,
     label: dateLabel(d.date),
   }));

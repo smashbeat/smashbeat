@@ -1,14 +1,28 @@
 import { Play, TrendingUp } from "lucide-react";
-import { ads } from "@/lib/mock-data";
+import type { Ad } from "@/lib/mock-data";
 import { fmtCompact, fmtPct, fmtRoas, fmtUSD } from "@/lib/format";
 import { Sparkline } from "./Sparkline";
 
-const ranked = [...ads]
-  .map((a) => ({ ad: a, score: a.revenue / a.spend }))
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 6);
+type Props = {
+  topAds: Array<{ ad: Ad; score: number }>;
+  totalCount?: number;
+};
 
-export function TopAdsGrid() {
+export function TopAdsGrid({ topAds, totalCount }: Props) {
+  if (topAds.length === 0) {
+    return (
+      <section className="card p-6 text-center">
+        <h2 className="text-base font-semibold text-ink-900">
+          Top creatives this period
+        </h2>
+        <p className="mt-1 text-sm text-ink-500">
+          No ad-level performance has come back from the last sync yet. Try
+          syncing once at least one ad has spent in the selected window.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="card p-4 md:p-5">
       <div className="flex items-center justify-between">
@@ -21,12 +35,14 @@ export function TopAdsGrid() {
             audience splits, and frame-by-frame retention.
           </p>
         </div>
-        <button className="text-sm font-medium text-ink-700 hover:underline">
-          See all 24 →
-        </button>
+        {typeof totalCount === "number" && totalCount > topAds.length && (
+          <button className="text-sm font-medium text-ink-700 hover:underline">
+            See all {totalCount} →
+          </button>
+        )}
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {ranked.map(({ ad, score }, i) => (
+        {topAds.map(({ ad, score }, i) => (
           <article
             key={ad.id}
             className="group flex overflow-hidden rounded-xl border border-ink-100 bg-white transition hover:shadow-pop"
@@ -56,8 +72,12 @@ export function TopAdsGrid() {
                 <span>{ad.platform}</span>
                 <span>·</span>
                 <span>{ad.format}</span>
-                <span>·</span>
-                <span>{ad.launchedDays}d live</span>
+                {ad.launchedDays > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>{ad.launchedDays}d live</span>
+                  </>
+                )}
               </div>
               <h3 className="mt-0.5 truncate text-sm font-semibold text-ink-900">
                 {ad.name}

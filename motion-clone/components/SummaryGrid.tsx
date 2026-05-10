@@ -8,12 +8,12 @@ import {
   fmtUSD,
   fmtUSDPrecise,
 } from "@/lib/format";
-import { summary } from "@/lib/mock-data";
+import type { SummaryStat } from "@/lib/report";
 import { Sparkline } from "./Sparkline";
 
 const formatValue = (
   value: number,
-  fmt: "usd" | "usd2" | "num" | "pct" | "roas",
+  fmt: SummaryStat["fmt"],
 ) => {
   switch (fmt) {
     case "usd":
@@ -29,10 +29,10 @@ const formatValue = (
   }
 };
 
-export function SummaryGrid() {
+export function SummaryGrid({ stats }: { stats: SummaryStat[] }) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      {summary.map((m) => {
+      {stats.map((m) => {
         const positive = m.inverted ? m.delta < 0 : m.delta > 0;
         return (
           <div key={m.key} className="card p-4">

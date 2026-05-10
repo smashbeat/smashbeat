@@ -2,18 +2,37 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { byFormat, byPlatform, byTag } from "@/lib/mock-data";
+import type { Breakdown } from "@/lib/report";
 import { fmtPct, fmtRoas, fmtUSD, fmtUSDPrecise } from "@/lib/format";
 
-const tabs = [
-  { key: "platform", label: "Platform", data: byPlatform },
-  { key: "format", label: "Format", data: byFormat },
-  { key: "tag", label: "Creative tag", data: byTag },
-] as const;
+type Props = {
+  byPlatform: Breakdown[];
+  byFormat: Breakdown[];
+  byTag: Breakdown[];
+};
 
-export function BreakdownTabs() {
-  const [active, setActive] = useState<(typeof tabs)[number]["key"]>("platform");
-  const current = tabs.find((t) => t.key === active)!;
+export function BreakdownTabs({ byPlatform, byFormat, byTag }: Props) {
+  const tabs = [
+    { key: "platform" as const, label: "Platform", data: byPlatform },
+    { key: "format" as const, label: "Format", data: byFormat },
+    { key: "tag" as const, label: "Creative tag", data: byTag },
+  ].filter((t) => t.data.length > 0);
+
+  const [active, setActive] = useState<string>(tabs[0]?.key ?? "platform");
+  const current = tabs.find((t) => t.key === active) ?? tabs[0];
+
+  if (!current) {
+    return (
+      <section className="card p-6 text-center">
+        <h2 className="text-base font-semibold text-ink-900">
+          Breakdown by dimension
+        </h2>
+        <p className="mt-1 text-sm text-ink-500">
+          No breakdown data yet — sync once you have insights for the period.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="card p-4 md:p-5">

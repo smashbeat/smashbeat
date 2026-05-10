@@ -1,8 +1,14 @@
 import { AlertTriangle, Lightbulb, TrendingDown, Trophy } from "lucide-react";
-import { fatigueSignals, winners } from "@/lib/mock-data";
+import type { Ad } from "@/lib/mock-data";
 import { fmtRoas, fmtUSD } from "@/lib/format";
 
-export function Insights() {
+type Props = {
+  winners: Array<{ ad: Ad; roas: number }>;
+  fatigue: Array<{ ad: Ad; drop: number }>;
+  hasTags: boolean;
+};
+
+export function Insights({ winners, fatigue, hasTags }: Props) {
   return (
     <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div className="card p-4 md:p-5">
@@ -18,6 +24,11 @@ export function Insights() {
           </div>
         </div>
         <ul className="mt-3 divide-y divide-ink-100">
+          {winners.length === 0 && (
+            <li className="py-3 text-sm text-ink-500">
+              No standouts to surface yet for this window.
+            </li>
+          )}
           {winners.map(({ ad, roas }) => (
             <li key={ad.id} className="flex items-center gap-3 py-2.5">
               <img
@@ -61,12 +72,12 @@ export function Insights() {
           </div>
         </div>
         <ul className="mt-3 divide-y divide-ink-100">
-          {fatigueSignals.length === 0 && (
+          {fatigue.length === 0 && (
             <li className="py-3 text-sm text-ink-500">
               Nothing trending down sharply right now.
             </li>
           )}
-          {fatigueSignals.map(({ ad, drop }) => (
+          {fatigue.map(({ ad, drop }) => (
             <li key={ad.id} className="flex items-center gap-3 py-2.5">
               <img
                 src={ad.thumbnail}
@@ -78,7 +89,8 @@ export function Insights() {
                   {ad.name}
                 </div>
                 <div className="text-[11px] text-ink-500">
-                  {ad.launchedDays}d live · {fmtUSD(ad.spend)} spent
+                  {ad.launchedDays > 0 ? `${ad.launchedDays}d live · ` : ""}
+                  {fmtUSD(ad.spend)} spent
                 </div>
               </div>
               <div className="text-right">
@@ -95,57 +107,61 @@ export function Insights() {
         </ul>
       </div>
 
-      <div className="card p-4 md:p-5 lg:col-span-2">
-        <div className="flex items-center gap-2">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-100 text-brand-700">
-            <Lightbulb className="h-4 w-4" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-ink-900">
-              What the snapshot suggests
-            </h2>
-            <p className="text-xs text-ink-500">
-              Heuristics applied to your tagged creative library.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {[
-            {
-              tag: "Founder POV",
-              note:
-                "Founder-led UGC drives the strongest hold rate of any tag in this account. Worth scaling into a 3-variant test next sprint.",
-              metric: "+34% hold vs. account avg",
-            },
-            {
-              tag: "Hook: statistic",
-              note:
-                "Statistic-led hooks are pulling above-average thumb-stop on TikTok, but conversion drops past second 12. Consider a tighter CTA.",
-              metric: "47.6% thumb-stop",
-            },
-            {
-              tag: "Discount call-out",
-              note:
-                "Static discount slates are eating share of spend with the lowest ROAS in the set. Cap budget or rotate within the week.",
-              metric: "1.76x ROAS",
-            },
-          ].map((b) => (
-            <div
-              key={b.tag}
-              className="rounded-lg border border-ink-100 bg-ink-50/60 p-3"
-            >
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">
-                Tag
-              </div>
-              <div className="text-sm font-semibold text-ink-900">{b.tag}</div>
-              <p className="mt-1 text-xs text-ink-600">{b.note}</p>
-              <div className="mt-2 inline-flex rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-ink-700 ring-1 ring-ink-100">
-                {b.metric}
-              </div>
+      {hasTags && (
+        <div className="card p-4 md:p-5 lg:col-span-2">
+          <div className="flex items-center gap-2">
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-100 text-brand-700">
+              <Lightbulb className="h-4 w-4" />
             </div>
-          ))}
+            <div>
+              <h2 className="text-sm font-semibold text-ink-900">
+                What the snapshot suggests
+              </h2>
+              <p className="text-xs text-ink-500">
+                Heuristics applied to your tagged creative library.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {[
+              {
+                tag: "Founder POV",
+                note:
+                  "Founder-led UGC drives the strongest hold rate of any tag in this account. Worth scaling into a 3-variant test next sprint.",
+                metric: "+34% hold vs. account avg",
+              },
+              {
+                tag: "Hook: statistic",
+                note:
+                  "Statistic-led hooks are pulling above-average thumb-stop on TikTok, but conversion drops past second 12. Consider a tighter CTA.",
+                metric: "47.6% thumb-stop",
+              },
+              {
+                tag: "Discount call-out",
+                note:
+                  "Static discount slates are eating share of spend with the lowest ROAS in the set. Cap budget or rotate within the week.",
+                metric: "1.76x ROAS",
+              },
+            ].map((b) => (
+              <div
+                key={b.tag}
+                className="rounded-lg border border-ink-100 bg-ink-50/60 p-3"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">
+                  Tag
+                </div>
+                <div className="text-sm font-semibold text-ink-900">
+                  {b.tag}
+                </div>
+                <p className="mt-1 text-xs text-ink-600">{b.note}</p>
+                <div className="mt-2 inline-flex rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-ink-700 ring-1 ring-ink-100">
+                  {b.metric}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }
