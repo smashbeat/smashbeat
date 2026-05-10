@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 247 248 250;
+  --foreground: 11 13 18;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: rgb(var(--background));
+  color: rgb(var(--foreground));
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-ink-100 bg-white shadow-card;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-ink-200 bg-white px-2 py-0.5 text-xs font-medium text-ink-600;
+  }
+  .stat-up {
+    @apply text-success;
+  }
+  .stat-down {
+    @apply text-danger;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-md bg-ink-50 px-2 py-1 text-xs font-medium text-ink-600;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-ink-50;
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-ink-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-ink-700;
+  }
+  .table-cell {
+    @apply px-3 py-3 text-sm text-ink-700 align-middle;
+  }
+  .table-head {
+    @apply px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-ink-400;
+  }
+}
+
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(221 225 232);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(185 192 204);
+}
