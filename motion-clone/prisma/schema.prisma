@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdAccount {
+  id              String      @id
+  name            String
+  currency        String
+  timezone        String?
+  accessTokenEnc  String
+  tokenExpiresAt  DateTime?
+  scopes          String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  lastSyncedAt    DateTime?
+  ads             Ad[]
+  insights        AdInsight[]
+  syncRuns        SyncRun[]
+}
+
+model Ad {
+  id              String      @id
+  accountId       String
+  account         AdAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name            String
+  status          String?
+  effectiveStatus String?
+  campaignId      String?
+  campaignName    String?
+  adsetId         String?
+  adsetName       String?
+  creativeId      String?
+  thumbnailUrl    String?
+  videoId         String?
+  videoSourceUrl  String?
+  format          String?
+  createdTime     DateTime?
+  launchedAt      DateTime?
+  insights        AdInsight[]
+
+  @@index([accountId])
+}
+
+model AdInsight {
+  id              Int       @id @default(autoincrement())
+  adId            String
+  ad              Ad        @relation(fields: [adId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         AdAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date            DateTime
+  spend           Float     @default(0)
+  impressions     Int       @default(0)
+  clicks          Int       @default(0)
+  linkClicks      Int       @default(0)
+  purchases       Int       @default(0)
+  revenue         Float     @default(0)
+  videoP25        Int       @default(0)
+  videoP50        Int       @default(0)
+  videoP75        Int       @default(0)
+  videoP100       Int       @default(0)
+  video3s         Int       @default(0)
+  thruplays       Int       @default(0)
+
+  @@unique([adId, date])
+  @@index([accountId, date])
+}
+
+model SyncRun {
+  id            Int       @id @default(autoincrement())
+  accountId     String
+  account       AdAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  status        String
+  error         String?
+  rowsUpserted  Int       @default(0)
+  rangeStart    DateTime?
+  rangeEnd      DateTime?
+}
+
+model OAuthState {
+  state       String   @id
+  redirectTo  String?
+  createdAt   DateTime @default(now())
+}
